@@ -5,11 +5,12 @@ model=dict(backbone=dict(patch_size=(2,4,4), drop_path_rate=0.1), test_cfg=dict(
 
 # dataset settings
 dataset_type = 'VideoDataset'
-data_root = 'data/kinetics400/train'
-data_root_val = 'data/kinetics400/val'
-ann_file_train = 'data/kinetics400/kinetics400_train_list.txt'
-ann_file_val = 'data/kinetics400/kinetics400_val_list.txt'
-ann_file_test = 'data/kinetics400/kinetics400_val_list.txt'
+data_root = 'data/kinetics400/videos_train'
+data_root_val = 'data/kinetics400/videos_val'
+ann_file_train = 'data/kinetics400/kinetics400_train_list_videos.txt'
+ann_file_val = 'data/kinetics400/kinetics400_val_list_videos.txt'
+ann_file_test = 'data/kinetics400/kinetics400_val_list_videos.txt'
+
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_bgr=False)
 train_pipeline = [
