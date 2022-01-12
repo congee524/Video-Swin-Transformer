@@ -64,8 +64,8 @@ data = dict(
     videos_per_gpu=32,
     workers_per_gpu=8,
     val_dataloader=dict(
-        videos_per_gpu=4,
-        workers_per_gpu=2
+        videos_per_gpu=1,
+        workers_per_gpu=1
     ),
     test_dataloader=dict(
         videos_per_gpu=1,
