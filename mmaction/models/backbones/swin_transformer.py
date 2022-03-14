@@ -158,6 +158,8 @@ class WindowAttention3D(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+        self.dog_filter = torch.from_numpy(np.array([-0.25, 0.5, -0.25]))
+
         trunc_normal_(self.relative_position_bias_table, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
@@ -195,7 +197,59 @@ class WindowAttention3D(nn.Module):
             attn = self.attn_drop(attn)
 
             x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
-        elif self.attn_type == 'dog':
+
+        elif self.attn_type == 'qk_dog':
+            # batches num_heads num_tokens channels//num_heads
+            _B, _nH, _N, _C = q.shape
+            assert _N == reduce(mul, self.window_size)
+            # batches num_heads T H W channels//num_heads
+            q = q.view((_B, _nH) + self.window_size + (_C, ))
+            k = k.view((_B, _nH) + self.window_size + (_C, ))
+            T, W, H = self.window_size
+
+            conv_kernel = self.dog_filter.view(1, 1, -1,
+                                               1).expand(_B * _nH, -1, -1, -1)
+
+            q = F.conv2d(
+                q.view(1, _B * _nH, T, W * H * _C),
+                conv_kernel,
+                bias=None,
+                stride=(1, 1),
+                padding=(1, 0),
+                groups=_B * _nH).view(_B, _nH, -1, _C)
+
+            k = F.conv2d(
+                k.view(1, _B * _nH, T, W * H * _C),
+                conv_kernel,
+                bias=None,
+                stride=(1, 1),
+                padding=(1, 0),
+                groups=_B * _nH).view(_B, _nH, -1, _C)
+
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+
+            relative_position_bias = self.relative_position_bias_table[
+                self.relative_position_index[:N, :N].reshape(-1)].reshape(
+                    N, N, -1)  # Wd*Wh*Ww,Wd*Wh*Ww,nH
+            relative_position_bias = relative_position_bias.permute(
+                2, 0, 1).contiguous()  # nH, Wd*Wh*Ww, Wd*Wh*Ww
+            attn = attn + relative_position_bias.unsqueeze(0)  # B_, nH, N, N
+
+            if mask is not None:
+                nW = mask.shape[0]
+                attn = attn.view(B_ // nW, nW, self.num_heads, N,
+                                 N) + mask.unsqueeze(1).unsqueeze(0)
+                attn = attn.view(-1, self.num_heads, N, N)
+                attn = self.softmax(attn)
+            else:
+                attn = self.softmax(attn)
+
+            attn = self.attn_drop(attn)
+
+            x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+
+        elif self.attn_type == 'kv_dog':
             q = q * self.scale
 
             _B, _nH, _N, _C = k.shape
@@ -205,6 +259,7 @@ class WindowAttention3D(nn.Module):
             T, W, H = self.window_size
             k = k[:, :, 1:T - 1] * 2 - k[:, :, :T - 2] - k[:, :, 2:]
             v = v[:, :, 1:T - 1] * 2 - v[:, :, :T - 2] - v[:, :, 2:]
+            # TODO: average 2d
             new_window_size = (T - 2, W, H)
             new_N = reduce(mul, new_window_size)
             k = k.view(_B, _nH, new_N, _C)
@@ -476,6 +531,7 @@ class BasicLayer(nn.Module):
                  attn_drop=0.,
                  drop_path=0.,
                  attn_type='normal',
+                 attn_pos=None,
                  norm_layer=nn.LayerNorm,
                  downsample=None,
                  use_checkpoint=False):
@@ -485,6 +541,9 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
         self.attn_type = attn_type
+        self.attn_pos = attn_pos
+        if self.attn_pos is None:
+            self.attn_pos = (1, ) * depth
 
         # build blocks
         self.blocks = nn.ModuleList([
@@ -502,7 +561,7 @@ class BasicLayer(nn.Module):
                 if isinstance(drop_path, list) else drop_path,
                 norm_layer=norm_layer,
                 use_checkpoint=use_checkpoint,
-                attn_type=attn_type,
+                attn_type=attn_type if self.attn_pos[i] else 'normal',
             ) for i in range(depth)
         ])
 
@@ -627,6 +686,7 @@ class SwinTransformer3D(nn.Module):
                  attn_drop_rate=0.,
                  drop_path_rate=0.2,
                  attn_type='normal',
+                 attn_pos=((1, 1), (1, 1), (1, 1, 1, 1, 1, 1), (1, 1)),
                  norm_layer=nn.LayerNorm,
                  patch_norm=False,
                  frozen_stages=-1,
@@ -642,6 +702,7 @@ class SwinTransformer3D(nn.Module):
         self.window_size = window_size
         self.patch_size = patch_size
         self.attn_type = attn_type
+        self.attn_pos = attn_pos
 
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed3D(
@@ -675,7 +736,8 @@ class SwinTransformer3D(nn.Module):
                 downsample=PatchMerging
                 if i_layer < self.num_layers - 1 else None,
                 use_checkpoint=use_checkpoint,
-                attn_type=attn_type)
+                attn_type=attn_type,
+                attn_pos=attn_pos[i_layer])
             self.layers.append(layer)
 
         self.num_features = int(embed_dim * 2**(self.num_layers - 1))

@@ -1,9 +1,12 @@
 _base_ = [
-    '../../_base_/models/swin/swin_small.py', '../../_base_/default_runtime.py'
+    '../../_base_/models/swin/swin_tiny.py', '../../_base_/default_runtime.py'
 ]
 model = dict(
     backbone=dict(
-        patch_size=(2, 4, 4), drop_path_rate=0.1, attn_type='kv_dog'),
+        patch_size=(2, 4, 4),
+        drop_path_rate=0.1,
+        attn_type='qk_dog',
+        attn_pos=((0, 1), (0, 1), (0, 1, 0, 1, 0, 1), (0, 1))),
     test_cfg=dict(max_testing_views=4))
 
 # dataset settings
@@ -13,7 +16,6 @@ data_root_val = 'data/kinetics400/videos_val'
 ann_file_train = 'data/kinetics400/kinetics400_train_list_videos.txt'
 ann_file_val = 'data/kinetics400/kinetics400_val_list_videos.txt'
 ann_file_test = 'data/kinetics400/kinetics400_val_list_videos.txt'
-
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_bgr=False)
 train_pipeline = [
@@ -110,14 +112,14 @@ total_epochs = 30
 
 # runtime settings
 checkpoint_config = dict(interval=1)
-work_dir = './work_dirs/k400_swin_small_patch244_window877.py'
+work_dir = './work_dirs/k400_swin_tiny_patch244_window877.py'
 find_unused_parameters = False
 
 # do not use mmdet version fp16
 fp16 = None
 optimizer_config = dict(
     type="DistOptimizerHook",
-    update_interval=8,
+    update_interval=4,
     grad_clip=None,
     coalesce=True,
     bucket_size_mb=-1,
