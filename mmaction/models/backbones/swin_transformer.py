@@ -203,8 +203,8 @@ class WindowAttention3D(nn.Module):
             _B, _nH, _N, _C = q.shape
             assert _N == reduce(mul, self.window_size)
             # batches num_heads T H W channels//num_heads
-            q = q.view((_B, _nH) + self.window_size + (_C, ))
-            k = k.view((_B, _nH) + self.window_size + (_C, ))
+            q = q.view((_B, _nH) + self.window_size + (_C, )).contiguous()
+            k = k.view((_B, _nH) + self.window_size + (_C, )).contiguous()
             T, W, H = self.window_size
 
             conv_kernel = self.dog_filter.view(1, 1, -1,
